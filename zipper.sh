@@ -3,10 +3,13 @@
 
 # natsort: sort -V
 
+# TODO: cd移動をやめてサブジェル化
+
 # マルチバイト文字の有無をチェック
 # $ret: マルチバイトファイル名のファイル数
 check_multibyte() {
   dir="$1"
+  current="`pwd`"
   ret=0
 
   cd "$dir"
@@ -14,12 +17,12 @@ check_multibyte() {
   do
     byte=`echo -n $file | wc -c`
     count=${#file}
-  
-    [ $byte -eq $count ] || ret=`expr $ret + 1`
-  
-  done < <(find . -type f -print0 | xargs --no-run-if-empty -0 -n1 basename | sort)
-  cd ..
 
+    [ $byte -eq $count ] || ret=`expr $ret + 1`
+
+  done < <(find . -type f -print0 | xargs --no-run-if-empty -0 -n1 basename | sort)
+
+  cd "$current"
   return $ret
 }
 
@@ -27,21 +30,24 @@ check_multibyte() {
 # $ret: 重複ファイル数
 check_duplicate() {
   dir="$1"
-  ret=0
+  current="`pwd`"
 
+  # 重複が1つでもあれば即エラー戻り値を返す
   cd "$dir"
-  all=` find . -type f -print0 | xargs --no-run-if-empty -0 -n1 basename |               wc -l` 
-  uniq=`find . -type f -print0 | xargs --no-run-if-empty -0 -n1 basename | sort | uniq | wc -l`
+  while read line
+  do
+    cd "$current"
+    return 1
+  done < <(find . -type f -print0 | xargs --no-run-if-empty -0 -n1 basename | sort | uniq -c | awk '$1!=1{print}')
 
-  [ $all -eq $uniq ] || ret=`expr $all - $uniq`
-  cd ..
-
-  return $ret
+  cd "$current"
+  return 0
 }
 
 # 圧縮の実行
 make_zip() {
   dir="$1"
+  current="`pwd`"
   ret=0
 
   echo "compress: $dir"
@@ -52,18 +58,17 @@ make_zip() {
   mkdir -p $temp
 
   # $tempを除外しないとタイミングにより一覧に入ることがある
+  # zipではアーカイブ内のファイル名が指定できないため1箇所に集約する
   find . -type d -name $temp -prune -o -type f -exec mv "{}" $temp/ \;
 
-    cd $temp
+  cd $temp
 
-    # 1ファイルごとaddすると遅いためリストで渡す
-    # -0: 無圧縮
-    find . -type f | sort -V | zip -q -0 "${dir}.zip" -@
-    mv "${dir}.zip" ../../
+  # 1ファイルごとaddすると遅いためリストで渡す
+  # -0: 無圧縮
+  find . -type f | sort -V | zip -q -0 "${dir}.zip" -@
+  mv "${dir}.zip" "$current"
 
-    cd ..
-  cd ..
-
+  cd "$current"
   return $ret
 }
 
@@ -83,12 +88,12 @@ do
 
   if [ $multi -ne 0 ]; then
     errs=`expr $errs + 1`
-    echo "ERROR: multibyte $dir" 
+    echo "ERROR: multibyte $dir"
   fi
 
   if [ $dup -ne 0 ]; then
     errs=`expr $errs + 1`
-    echo "ERROR: duplicate $dir" 
+    echo "ERROR: duplicate $dir"
   fi
 
 done < <(find . -mindepth 1 -maxdepth 1 -type d -print0 | xargs --no-run-if-empty -0 -n1 basename | sort)
